@@ -1674,6 +1674,15 @@ int CLI::run(int argc, char **argv)
 
     ::setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", /* replace */ false);
 
+    // WebKitGTK's DMA-BUF renderer leaves the web panels (home, login, device)
+    // blank on the proprietary NVIDIA driver.
+    ::setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", /* replace */ false);
+
+    // Make sure GLX resolves to the NVIDIA vendor library when it is installed
+    // (hybrid / XWayland setups can otherwise pick Mesa).
+    if (::access("/usr/lib/libGLX_nvidia.so.0", F_OK) == 0)
+        ::setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", /* replace */ false);
+
     // Also on Linux, we need to tell Xlib that we will be using threads,
     // lest we crash when we fire up GStreamer.
     XInitThreads();
