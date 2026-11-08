@@ -1,0 +1,18 @@
+# Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro...)
+# Dependencies are expected to be installed with pacman; -u is not supported here.
+FOUND_GTK3=$(pacman -Q gtk3 2>/dev/null || true)
+FOUND_GTK3_DEV=${FOUND_GTK3}
+
+REQUIRED_DEV_PACKAGES=(
+    autoconf automake base-devel extra-cmake-modules file gettext git
+    gstreamer gst-plugins-base-libs gtk3 libmspack libsecret libtool m4
+    glu mesa ninja openssl texinfo wayland wayland-protocols libxkbcommon
+    wget curl nasm yasm x264 webkit2gtk-4.1 eglexternalplatform dbus
+    glew libunwind bzip2
+)
+
+if [[ -n "$UPDATE_LIB" ]]
+then
+    echo "On Arch, install dependencies with: sudo pacman -S --needed ${REQUIRED_DEV_PACKAGES[*]}"
+    exit 1
+fi
