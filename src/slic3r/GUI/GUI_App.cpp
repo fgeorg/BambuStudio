@@ -303,6 +303,23 @@ bool is_associate_files(std::wstring extend)
 class BBLSplashScreen : public wxSplashScreen
 {
 public:
+    // On GTK, wxWidgets does not scale DIP sizes by the font DPI (Xft.dpi), but
+    // Pango does scale text by it. With fractional scaling under XWayland this
+    // makes the splash text larger than the fixed-size bitmap and it gets clipped.
+    // Return the text scale factor so the bitmap and layout can grow to match.
+    static float text_scale()
+    {
+#ifdef __WXGTK3__
+        GdkScreen* screen = gdk_screen_get_default();
+        if (screen) {
+            double res = gdk_screen_get_resolution(screen);
+            if (res > 96.0)
+                return float(res / 96.0);
+        }
+#endif
+        return 1.0f;
+    }
+
     BBLSplashScreen(const wxBitmap& bitmap, long splashStyle, int milliseconds, wxPoint pos = wxDefaultPosition)
         : wxSplashScreen(bitmap, splashStyle, milliseconds, static_cast<wxWindow*>(wxGetApp().mainframe), wxID_ANY, wxDefaultPosition, wxDefaultSize,
 #ifdef __APPLE__
@@ -322,6 +339,8 @@ public:
         m_main_bitmap = bitmap;
 
         scale_bitmap(m_main_bitmap, m_scale);
+        // bitmap was already enlarged by text_scale() in MakeBitmap(); scale layout to match
+        m_scale *= text_scale();
 
         // init constant texts and scale fonts
         m_constant_text.init(Label::Body_16);
@@ -417,8 +436,8 @@ public:
 
     static wxBitmap MakeBitmap()
     {
-        int width = FromDIP(480, nullptr);
-        int height = FromDIP(480, nullptr);
+        int width = int(FromDIP(480, nullptr) * text_scale());
+        int height = int(FromDIP(480, nullptr) * text_scale());
 
         wxImage image(width, height);
         wxBitmap new_bmp(image);
