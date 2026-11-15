@@ -1762,13 +1762,27 @@ void PrintingTaskPanel::on_stage_clicked(wxMouseEvent &event)
     event.Skip();
 }
 
-void PrintingTaskPanel::update_progress_percent(wxString percent, wxString icon)
+// wxStaticText keeps its old best size after SetLabelText() on GTK, so the
+// containing sizer must be re-laid out or the new text gets clipped.
+static bool set_label_and_relayout(wxStaticText *label, const wxString &text)
 {
-    m_staticText_progress_percent->SetLabelText(percent);
-    m_staticText_progress_percent_icon->SetLabelText(icon);
+    if (label->GetLabelText() == text) return false;
+    label->SetLabelText(text);
+    label->InvalidateBestSize();
+    label->GetParent()->Layout();
+    return true;
 }
 
-void PrintingTaskPanel::update_left_time(wxString time) { m_staticText_progress_left->SetLabelText(time); }
+void PrintingTaskPanel::update_progress_percent(wxString percent, wxString icon)
+{
+    set_label_and_relayout(m_staticText_progress_percent, percent);
+    set_label_and_relayout(m_staticText_progress_percent_icon, icon);
+}
+
+void PrintingTaskPanel::update_left_time(wxString time)
+{
+    set_label_and_relayout(m_staticText_progress_left, time);
+}
 
 void PrintingTaskPanel::update_finish_time_display(const wxString &text, const wxString &day_text)
 {
@@ -1838,13 +1852,9 @@ void PrintingTaskPanel::update_layers_num(bool show, wxString num)
 {
     if ((show == m_staticText_layers->IsShown()) && (num == m_staticText_layers->GetLabelText())) { return; }
 
-    if (show) {
-        m_staticText_layers->Show(true);
-        m_staticText_layers->SetLabelText(num);
-    } else {
-        m_staticText_layers->Show(false);
-        m_staticText_layers->SetLabelText(num);
-    }
+    m_staticText_layers->Show(show);
+    if (!set_label_and_relayout(m_staticText_layers, num))
+        m_staticText_layers->GetParent()->Layout();
 }
 
 void PrintingTaskPanel::updatePauseNum(bool show, wxString num)
@@ -1853,7 +1863,8 @@ void PrintingTaskPanel::updatePauseNum(bool show, wxString num)
         return;
 
     m_staticTextPauses->Show(show);
-    m_staticTextPauses->SetLabelText(num);
+    if (!set_label_and_relayout(m_staticTextPauses, num))
+        m_staticTextPauses->GetParent()->Layout();
 }
 
 void PrintingTaskPanel::updatePauseMarkers(const DevPrintPauseList *pauseList, int printRemainingTime)
