@@ -2378,6 +2378,14 @@ DiffPresetDialog::DiffPresetDialog(MainFrame* mainframe)
     : DPIDialog(mainframe, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
     m_pr_technology(wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology())
 {
+    // The controls (and two full copies of the preset bundle) are created on first show(): doing it
+    // here cost ~0.3 s of every startup for a dialog most sessions never open.
+}
+
+void DiffPresetDialog::build()
+{
+    m_pr_technology = wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology();
+
 #if defined(__WXMSW__)
     // ys_FIXME! temporary workaround for correct font scaling
     // Because of from wxWidgets 3.1.3 auto rescaling is implemented for the Fonts,
@@ -2539,6 +2547,7 @@ void DiffPresetDialog::update_bundles_from_app()
 
 void DiffPresetDialog::show(Preset::Type type /* = Preset::TYPE_INVALID*/)
 {
+    if (!m_selector) build();
     this->SetTitle(_L("Compare presets"));
     m_opened_generically = (type == Preset::TYPE_INVALID);
 
@@ -2569,6 +2578,7 @@ void DiffPresetDialog::show(Preset::Type type /* = Preset::TYPE_INVALID*/)
 
 void DiffPresetDialog::update_presets(Preset::Type type)
 {
+    if (!m_selector) return; // not built yet; show() builds it from the current presets
     const PrinterTechnology prev_tech = m_pr_technology;
     m_pr_technology = m_preset_bundle_left.get()->printers.get_edited_preset().printer_technology();
 
@@ -2785,6 +2795,7 @@ void DiffPresetDialog::update_tree()
 
 void DiffPresetDialog::on_dpi_changed(const wxRect&)
 {
+    if (!m_selector) return;
     int em = em_unit();
 
     msw_buttons_rescale(this, em, { wxID_CANCEL});
@@ -2803,6 +2814,7 @@ void DiffPresetDialog::on_dpi_changed(const wxRect&)
 
 void DiffPresetDialog::on_sys_color_changed()
 {
+    if (!m_selector) return;
 #ifdef _WIN32
     // Re-theme the whole dialog tree — mirrors the ctor's UpdateDlgDarkUI so a live light/dark
     // switch also reaches the tab bar and A/B selector (both hardcode a white background); the

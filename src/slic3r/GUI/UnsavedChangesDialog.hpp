@@ -554,6 +554,8 @@ class DiffPresetDialog : public DPIDialog
     PresetSelectorPanel *m_selector{nullptr};
     void                 do_update_tree(const Preset *left, const Preset *right, std::vector<std::string> &dirty_options);
     void                 make_variant_row();
+    // Creates the controls; deferred from the constructor to the first show(). m_selector != nullptr once built.
+    void                 build();
 
 public:
     DiffPresetDialog(MainFrame* mainframe);
