@@ -1,0 +1,141 @@
+diff --git a/include/wx/window.h b/include/wx/window.h
+index 4bc21b75b9..e7d4564d01 100644
+--- a/include/wx/window.h
++++ b/include/wx/window.h
+@@ -2074,7 +2074,40 @@ inline wxWindow *wxWindowBase::GetGrandParent() const
+     return m_parent ? m_parent->GetParent() : NULL;
+ }
+ 
+-#ifdef wxHAVE_DPI_INDEPENDENT_PIXELS
++#if defined(wxHAVE_DPI_INDEPENDENT_PIXELS) && defined(__WXGTK3__)
++
++// GTK 3 only scales logical pixels by an integer factor (GDK_SCALE), while
++// fractional scaling (e.g. 1.75x under XWayland on KDE/GNOME) is expressed
++// solely through the font DPI (Xft.dpi). Pango scales text by it but sizes in
++// "DIPs" were left untouched, so text overflowed fixed-size controls. Scale
++// DIPs by the same factor that text is scaled by to keep them consistent.
++WXDLLIMPEXP_CORE double wxGTKGetDIPScaleFactor();
++
++inline int wxGTKScaleDIP(int v, double f)
++{
++    const double r = v * f;
++    return int(r < 0 ? r - 0.5 : r + 0.5);
++}
++
++/* static */
++inline wxSize
++wxWindowBase::FromDIP(const wxSize& sz, const wxWindowBase* WXUNUSED(w))
++{
++    const double f = wxGTKGetDIPScaleFactor();
++    return wxSize(sz.x == -1 ? -1 : wxGTKScaleDIP(sz.x, f),
++                  sz.y == -1 ? -1 : wxGTKScaleDIP(sz.y, f));
++}
++
++/* static */
++inline wxSize
++wxWindowBase::ToDIP(const wxSize& sz, const wxWindowBase* WXUNUSED(w))
++{
++    const double f = wxGTKGetDIPScaleFactor();
++    return wxSize(sz.x == -1 ? -1 : wxGTKScaleDIP(sz.x, 1 / f),
++                  sz.y == -1 ? -1 : wxGTKScaleDIP(sz.y, 1 / f));
++}
++
++#elif defined(wxHAVE_DPI_INDEPENDENT_PIXELS)
+ 
+ // FromDIP() and ToDIP() become trivial in this case, so make them inline to
+ // avoid any overhead.
+diff --git a/src/gtk/stattext.cpp b/src/gtk/stattext.cpp
+index 524b6d97b8..6f858c8f01 100644
+--- a/src/gtk/stattext.cpp
++++ b/src/gtk/stattext.cpp
+@@ -12,6 +12,7 @@
+ #if wxUSE_STATTEXT
+ 
+ #include "wx/stattext.h"
++#include "wx/arrstr.h"
+ 
+ #include "wx/gtk/private.h"
+ 
+@@ -256,6 +257,32 @@ wxSize wxStaticText::DoGetBestSize() const
+ 
+     // Adding 1 to width to workaround GTK sometimes wrapping the text needlessly
+     size.x++;
++
++#ifdef __WXGTK3__
++    // GTK may report a preferred size computed from a stale style (e.g. before
++    // a font set via CSS has been applied), which is smaller than the text
++    // actually drawn. Make sure the label is never smaller than its text.
++    if ( m_font.IsOk() && !IsEllipsized() )
++    {
++        int w = 0, h = 0;
++        GetTextExtent(GetLabelText(), &w, &h);
++        // GetTextExtent() doesn't handle multiple lines, measure each one.
++        const wxArrayString lines = wxSplit(GetLabelText(), '\n', '\0');
++        if ( lines.size() > 1 )
++        {
++            w = h = 0;
++            for ( size_t i = 0; i < lines.size(); ++i )
++            {
++                int lw = 0, lh = 0;
++                GetTextExtent(lines[i].empty() ? wxString("W") : lines[i], &lw, &lh);
++                w = wxMax(w, lw);
++                h += lh;
++            }
++        }
++        size.x = wxMax(size.x, w + 1);
++        size.y = wxMax(size.y, h);
++    }
++#endif
+     return size;
+ }
+ 
+diff --git a/src/gtk/window.cpp b/src/gtk/window.cpp
+index 2497cf9344..14778b5dea 100644
+--- a/src/gtk/window.cpp
++++ b/src/gtk/window.cpp
+@@ -32,6 +32,7 @@
+ #include "wx/caret.h"
+ #include "wx/fontutil.h"
+ #include "wx/sysopt.h"
++#include "wx/utils.h"
+ #ifdef __WXGTK3__
+     #include "wx/gtk/dc.h"
+ #endif
+@@ -4370,6 +4371,37 @@ double wxWindowGTK::GetContentScaleFactor() const
+     return scaleFactor;
+ }
+ 
++#ifdef __WXGTK3__
++double wxGTKGetDIPScaleFactor()
++{
++    static double s_factor = 0;
++    if ( s_factor > 0 )
++        return s_factor;
++
++    // Allow overriding the factor, e.g. WXGTK_DIP_SCALE=1 restores the old
++    // behaviour of not scaling DIPs at all.
++    wxString env;
++    double value;
++    if ( wxGetEnv("WXGTK_DIP_SCALE", &env) && env.ToCDouble(&value) && value > 0 )
++    {
++        s_factor = value;
++        return s_factor;
++    }
++
++    GdkScreen* screen = gdk_screen_get_default();
++    if ( !screen )
++        return 1; // GTK not initialized yet, don't cache
++
++    double factor = 1;
++    const double res = gdk_screen_get_resolution(screen);
++    if ( res > 0 )
++        factor = wxClip(res / 96.0, 1.0, 4.0);
++
++    s_factor = factor;
++    return s_factor;
++}
++#endif // __WXGTK3__
++
+ double wxWindowGTK::GetDPIScaleFactor() const
+ {
+     // Under GTK 3 DPI scale factor is the same as content scale factor, while

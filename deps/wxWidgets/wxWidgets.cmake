@@ -23,9 +23,17 @@ endif ()
 #     set(_patch_cmd test -f WXWIDGETS_PATCHED || ${PATCH_CMD} ${CMAKE_CURRENT_LIST_DIR}/0001-wxWidget-fix.patch && touch WXWIDGETS_PATCHED)
 # endif ()
 
+set(_wx_patch_cmd "")
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Idempotent: skip if the patch is already applied (re-runs after an update step).
+    set(_wx_patch_cmd PATCH_COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${CMAKE_CURRENT_LIST_DIR}/0002-GTK3-scale-DIPs-by-font-DPI.patch
+        || ${PATCH_CMD} ${CMAKE_CURRENT_LIST_DIR}/0002-GTK3-scale-DIPs-by-font-DPI.patch)
+endif ()
+
 bambustudio_add_cmake_project(wxWidgets
     GIT_REPOSITORY "https://github.com/bambulab/wxWidgets"
     GIT_TAG master
+    ${_wx_patch_cmd}
     DEPENDS ${PNG_PKG} ${ZLIB_PKG} ${EXPAT_PKG} ${TIFF_PKG} ${JPEG_PKG}
     CMAKE_ARGS
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5
