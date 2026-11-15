@@ -3692,7 +3692,12 @@ bool GUI_App::on_init_inner()
     BOOST_LOG_TRIVIAL(info) << "create the main window";
     mainframe = new MainFrame();
     // hide settings tabs after first Layout
-    if (is_editor()) {
+    if (is_editor() && init_params->input_files.empty()) {
+        // Open straight on the Prepare tab, where post_init() sets up OpenGL anyway, rather than showing
+        // Home first and then flashing a black frame while switching. Rendering stays off until then.
+        plater_->canvas3D()->enable_render(false);
+        mainframe->select_tab(size_t(MainFrame::tp3DEditor));
+    } else if (is_editor()) {
         mainframe->select_tab(size_t(0));
     }
 

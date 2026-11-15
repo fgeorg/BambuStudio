@@ -1212,6 +1212,7 @@ public:
     void on_mouse(wxMouseEvent& evt);
     void on_gesture(wxGestureEvent& evt);
     void on_paint(wxPaintEvent& evt);
+    void paint_loading_placeholder();
     void on_kill_focus(wxFocusEvent &evt);
     void on_set_focus(wxFocusEvent& evt);
     void on_back_slice_begin();

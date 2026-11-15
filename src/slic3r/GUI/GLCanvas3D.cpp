@@ -62,6 +62,8 @@
 #include <wx/glcanvas.h>
 #include <wx/bitmap.h>
 #include <wx/dcmemory.h>
+#include <wx/dcclient.h>
+#include <wx/graphics.h>
 #include <wx/image.h>
 #include <wx/settings.h>
 #include <wx/tooltip.h>
@@ -6527,9 +6529,41 @@ void GLCanvas3D::on_paint(wxPaintEvent& evt)
 {
     if (m_initialized)
         m_dirty = true;
+    else if (!m_enable_render)
+        // OpenGL is about to be set up by GUI_App::post_init(); show a themed placeholder instead of
+        // an uninitialized (black) window until then.
+        paint_loading_placeholder();
     else
         // Call render directly, so it gets initialized immediately, not from On Idle handler.
         this->render();
+}
+
+void GLCanvas3D::paint_loading_placeholder()
+{
+    wxPaintDC dc(m_canvas);
+    const float *bg = wxGetApp().dark_mode() ? DEFAULT_BG_LIGHT_COLOR_DARK : DEFAULT_BG_LIGHT_COLOR;
+    const wxColour bg_colour(int(bg[0] * 255), int(bg[1] * 255), int(bg[2] * 255));
+    const wxSize   size = m_canvas->GetClientSize();
+    dc.SetBackground(wxBrush(bg_colour));
+    dc.Clear();
+
+    std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+    if (!gc)
+        return;
+    const wxColour fg     = wxGetApp().dark_mode() ? wxColour(170, 170, 176) : wxColour(110, 110, 115);
+    const double   radius = m_canvas->FromDIP(14);
+    const double   cx = size.x / 2.0, cy = size.y / 2.0 - radius;
+    // A spinner-like ring: a faint full circle with a brand-green arc on top.
+    gc->SetPen(wxPen(fg.ChangeLightness(wxGetApp().dark_mode() ? 60 : 140), m_canvas->FromDIP(3)));
+    gc->StrokePath([&] { wxGraphicsPath p = gc->CreatePath(); p.AddCircle(cx, cy, radius); return p; }());
+    gc->SetPen(wxPen(wxColour(0, 174, 66), m_canvas->FromDIP(3)));
+    gc->StrokePath([&] { wxGraphicsPath p = gc->CreatePath(); p.AddArc(cx, cy, radius, -M_PI / 2, 0, true); return p; }());
+
+    gc->SetFont(wxGetApp().normal_font(), fg);
+    const wxString text = _L("Loading 3D view...");
+    double tw, th;
+    gc->GetTextExtent(text, &tw, &th);
+    gc->DrawText(text, cx - tw / 2, cy + radius + m_canvas->FromDIP(12));
 }
 
 void GLCanvas3D::on_kill_focus(wxFocusEvent &evt)
