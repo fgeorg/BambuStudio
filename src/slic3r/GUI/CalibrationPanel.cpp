@@ -454,19 +454,16 @@ CalibrationPanel::CalibrationPanel(wxWindow* parent, wxWindowID id, const wxPoin
 {
     SetBackgroundColour(*wxWHITE);
 
-    init_tabpanel();
-
-    wxBoxSizer* sizer_main = new wxBoxSizer(wxVERTICAL);
-    sizer_main->Add(m_tabpanel, 1, wxEXPAND, 0);
-
-    SetSizerAndFit(sizer_main);
-    Layout();
+    // The calibration wizards are created on first Show(true): building them cost ~0.3 s of every
+    // startup, and most sessions never open the Calibration tab.
+    SetSizer(new wxBoxSizer(wxVERTICAL));
 
     init_timer();
     Bind(wxEVT_TIMER, &CalibrationPanel::on_timer, this);
 }
 
 void CalibrationPanel::init_tabpanel() {
+    if (m_initialized) return;
     m_side_tools = new SideTools(this, wxID_ANY);
     m_side_tools->get_panel()->Connect(wxEVT_LEFT_DOWN, wxMouseEventHandler(CalibrationPanel::on_printer_clicked), NULL, this);
 
@@ -498,6 +495,11 @@ void CalibrationPanel::init_tabpanel() {
     auto padding_size = m_tabpanel->GetBtnsListCtrl()->GetPaddingSize(0);
     m_tabpanel->GetBtnsListCtrl()->SetPaddingSize({ FromDIP(15), padding_size.y });
 
+    GetSizer()->Add(m_tabpanel, 1, wxEXPAND, 0);
+    // Created after MainFrame applied the colour theme to all its children, so apply it here.
+    wxGetApp().UpdateDarkUIWin(this);
+    Layout();
+
     m_initialized = true;
 }
 
@@ -514,6 +516,7 @@ void CalibrationPanel::on_timer(wxTimerEvent& event) {
 }
 
 void CalibrationPanel::update_print_error_info(int code, std::string msg, std::string extra) {
+    if (!m_initialized) return;
     // update current wizard only
     int curr_selected = m_tabpanel->GetSelection();
     if (curr_selected >= 0 && curr_selected < CALI_MODE_COUNT) {
@@ -534,6 +537,7 @@ void CalibrationPanel::update_print_error_info(int code, std::string msg, std::s
 }
 
 void CalibrationPanel::update_all() {
+    if (!m_initialized) return;
 
     NetworkAgent* m_agent = wxGetApp().getAgent();
     Slic3r::DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
@@ -650,6 +654,7 @@ void CalibrationPanel::show_status(int status)
 
 bool CalibrationPanel::Show(bool show) {
     if (show) {
+        init_tabpanel();
         m_refresh_timer->Stop();
         m_refresh_timer->SetOwner(this);
         m_refresh_timer->Start(REFRESH_INTERVAL);
@@ -702,6 +707,7 @@ void CalibrationPanel::set_default()
 
 void CalibrationPanel::msw_rescale()
 {
+    if (!m_initialized) return;
     for (int i = 0; i < (int)CALI_MODE_COUNT; i++) {
         m_cali_panels[i]->msw_rescale();
     }
@@ -709,13 +715,15 @@ void CalibrationPanel::msw_rescale()
 
 void CalibrationPanel::on_sys_color_changed()
 {
+    if (!m_initialized) return;
     for (int i = 0; i < (int)CALI_MODE_COUNT; i++) {
         m_cali_panels[i]->on_sys_color_changed();
     }
 }
 
 CalibrationPanel::~CalibrationPanel() {
-    m_side_tools->get_panel()->Disconnect(wxEVT_LEFT_DOWN, wxMouseEventHandler(CalibrationPanel::on_printer_clicked), NULL, this);
+    if (m_side_tools)
+        m_side_tools->get_panel()->Disconnect(wxEVT_LEFT_DOWN, wxMouseEventHandler(CalibrationPanel::on_printer_clicked), NULL, this);
     if (m_refresh_timer)
         m_refresh_timer->Stop();
     delete m_refresh_timer;

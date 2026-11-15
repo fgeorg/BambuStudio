@@ -4415,7 +4415,7 @@ void MainFrame::request_select_tab(TabPosition pos)
 
 int MainFrame::get_calibration_curr_tab() {
     if (m_calibration)
-        return m_calibration->get_tabpanel()->GetSelection();
+        return m_calibration->get_tabpanel() ? m_calibration->get_tabpanel()->GetSelection() : 0;
     return -1;
 }
 
