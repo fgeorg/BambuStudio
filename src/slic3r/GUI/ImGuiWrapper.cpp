@@ -2848,6 +2848,12 @@ void ImGuiWrapper::init_font(bool compress)
     glsafe(::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
     glsafe(::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
     glsafe(::glPixelStorei(GL_UNPACK_ROW_LENGTH, 0));
+#ifdef __linux__
+    // The atlas includes the whole CJK ideograph block for every language, so it is huge (8192 x ~4000 at
+    // 1.75x scale). Mesa and the NVIDIA driver compress it to DXT5 on the CPU, which stalled startup for
+    // ~0.5 s; uploading it uncompressed takes ~20 ms at the cost of some extra video memory.
+    compress = false;
+#endif
     if (compress && GLEW_EXT_texture_compression_s3tc)
         glsafe(::glTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels));
     else
