@@ -38,6 +38,7 @@
 #include <wx/language.h>
 
 #include <mutex>
+#include <thread>
 #include <stack>
 #include "libslic3r/Log.hpp"
 
@@ -363,6 +364,13 @@ private:
     std::vector<bool> m_create_preset_blocked { false, false, false, false, false, false }; // excceed limit
     bool m_networking_compatible { false };
     bool m_networking_need_update { false };
+    // Startup loads the networking plugin on a worker thread so the main window can show first.
+    // m_network_loading is true until the agent has been attached on the main thread.
+    bool m_network_loading { false };
+    bool m_post_init_network_pending { false };
+    int  m_tab_after_network_load { -1 };
+    std::string m_assumed_preset_folder;
+    std::thread m_network_loader;
     bool m_networking_cancel_update { false };
     std::shared_ptr<UpgradeNetworkJob> m_upgrade_network_job;
 
@@ -880,6 +888,10 @@ public:
     bool            check_networking_version();
     void            cancel_networking_install();
     void            restart_networking();
+    // True while the networking plugin is still being loaded in the background at startup.
+    bool            is_network_loading() const { return m_network_loading; }
+    // Called by the main frame when the user selects a tab that needs the network agent while it is loading.
+    void            open_tab_after_network_load(int tab) { m_tab_after_network_load = tab; }
     void            check_config_updates_from_updater();
     void            check_config_updates_from_menu();
 
@@ -901,6 +913,21 @@ private:
     bool            on_init_inner();
     void            copy_network_if_available();
     bool            on_init_network(bool try_backup = false);
+    // The slow half of on_init_network(): loads the plugin and creates the agent. It reads no
+    // application state, so it can run on a worker thread.
+    struct NetworkLoadResult
+    {
+        Slic3r::NetworkAgent *agent { nullptr };
+        bool                  compatible { false };
+        bool                  need_update { false };
+    };
+    static NetworkLoadResult create_network_agent(bool try_backup, bool check_cert, bool installed_networking);
+    // The main-thread half of on_init_network(): sets up the managers and callbacks around the agent.
+    void            attach_network_agent(const NetworkLoadResult &result);
+    void            start_network_loading();
+    void            on_network_loaded(const NetworkLoadResult &result);
+    // The parts of post_init() that need the network agent.
+    void            post_init_network();
     void            init_networking_callbacks();
     void            init_app_config();
     void            remove_old_networking_plugins();

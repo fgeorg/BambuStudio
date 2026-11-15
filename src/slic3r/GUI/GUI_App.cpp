@@ -1186,15 +1186,6 @@ void GUI_App::post_init()
     if (! this->initialized())
         throw Slic3r::RuntimeError("Calling post_init() while not yet initialized");
 
-    if (app_config->get("sync_user_preset") == "true") {
-        if (m_agent) { start_sync_user_preset(); }
-        BOOST_LOG_TRIVIAL(info) << "sync_user_preset: true";
-    } else {
-        BOOST_LOG_TRIVIAL(info) << "sync_user_preset: false";
-    }
-
-
-
     wxGetApp().report_consent_common(app_config->get("firstguide", "privacyuse") == "true"? true : false, "studio_improvement_policy_enable", "StudioImprovementPolicy");
 
     /*request helio config*/
@@ -1315,7 +1306,9 @@ void GUI_App::post_init()
             BOOST_LOG_TRIVIAL(warning) << "Found glcontext not ready, postpone the init";
         }
 //#endif
-        if (is_editor())
+        // Start on the Prepare tab (already selected above to initialize OpenGL) instead of switching back
+        // to the web-based Home tab. Fall back to Home if OpenGL could not be initialized yet.
+        if (is_editor() && !plater_->canvas3D()->is_initialized())
             mainframe->select_tab(size_t(0));
         mainframe->Thaw();
         BOOST_LOG_TRIVIAL(info) << "end load_gl_resources";
@@ -1394,6 +1387,63 @@ void GUI_App::post_init()
         }
     }*/
 
+    // The network agent may still be loading in the background; if so, this runs once it is there.
+    if (m_network_loading) {
+        m_post_init_network_pending = true;
+        start_network_loading();
+    } else
+        post_init_network();
+
+    // remove old log files over LOG_FILES_MAX_NUM
+    std::string log_addr = data_dir();
+    if (!log_addr.empty()) {
+        auto log_folder = boost::filesystem::path(log_addr) / "log";
+        if (boost::filesystem::exists(log_folder)) {
+           std::vector<std::pair<time_t, std::string>> files_vec;
+           for (auto& it : boost::filesystem::directory_iterator(log_folder)) {
+               auto temp_path = it.path();
+               try {
+                   if (it.status().type() == boost::filesystem::regular_file) {
+                       std::time_t lw_t = boost::filesystem::last_write_time(temp_path) ;
+                       files_vec.push_back({ lw_t, temp_path.filename().string() });
+                   }
+               } catch (const std::exception &) {
+               }
+           }
+           std::sort(files_vec.begin(), files_vec.end(), [](
+               std::pair<time_t, std::string> &a, std::pair<time_t, std::string> &b) {
+               return a.first > b.first;
+           });
+
+           while (files_vec.size() > LOG_FILES_MAX_NUM) {
+               auto full_path = log_folder / boost::filesystem::path(files_vec[files_vec.size() - 1].second);
+               BOOST_LOG_TRIVIAL(info) << "delete log file over " << LOG_FILES_MAX_NUM << ", filename: "<< files_vec[files_vec.size() - 1].second;
+               try {
+                   boost::filesystem::remove(full_path);
+               }
+               catch (const std::exception& ex) {
+                   BOOST_LOG_TRIVIAL(error) << "failed to delete log file: "<< files_vec[files_vec.size() - 1].second << ". Error: " << ex.what();
+               }
+               files_vec.pop_back();
+           }
+        }
+    }
+    BOOST_LOG_TRIVIAL(info) << "finished post_init";
+#ifdef _WIN32
+    // Sets window property to mainframe so other instances can indentify it.
+    OtherInstanceMessageHandler::init_windows_properties(mainframe, m_instance_hash_int);
+#endif //WIN32
+}
+
+void GUI_App::post_init_network()
+{
+    if (app_config->get("sync_user_preset") == "true") {
+        if (m_agent) { start_sync_user_preset(); }
+        BOOST_LOG_TRIVIAL(info) << "sync_user_preset: true";
+    } else {
+        BOOST_LOG_TRIVIAL(info) << "sync_user_preset: false";
+    }
+
     if (m_networking_need_update) {
         //updating networking
         int ret = updating_bambu_networking();
@@ -1466,46 +1516,6 @@ void GUI_App::post_init()
     CallAfter([this] {
             mainframe->refresh_plugin_tips();
         });
-
-    // remove old log files over LOG_FILES_MAX_NUM
-    std::string log_addr = data_dir();
-    if (!log_addr.empty()) {
-        auto log_folder = boost::filesystem::path(log_addr) / "log";
-        if (boost::filesystem::exists(log_folder)) {
-           std::vector<std::pair<time_t, std::string>> files_vec;
-           for (auto& it : boost::filesystem::directory_iterator(log_folder)) {
-               auto temp_path = it.path();
-               try {
-                   if (it.status().type() == boost::filesystem::regular_file) {
-                       std::time_t lw_t = boost::filesystem::last_write_time(temp_path) ;
-                       files_vec.push_back({ lw_t, temp_path.filename().string() });
-                   }
-               } catch (const std::exception &) {
-               }
-           }
-           std::sort(files_vec.begin(), files_vec.end(), [](
-               std::pair<time_t, std::string> &a, std::pair<time_t, std::string> &b) {
-               return a.first > b.first;
-           });
-
-           while (files_vec.size() > LOG_FILES_MAX_NUM) {
-               auto full_path = log_folder / boost::filesystem::path(files_vec[files_vec.size() - 1].second);
-               BOOST_LOG_TRIVIAL(info) << "delete log file over " << LOG_FILES_MAX_NUM << ", filename: "<< files_vec[files_vec.size() - 1].second;
-               try {
-                   boost::filesystem::remove(full_path);
-               }
-               catch (const std::exception& ex) {
-                   BOOST_LOG_TRIVIAL(error) << "failed to delete log file: "<< files_vec[files_vec.size() - 1].second << ". Error: " << ex.what();
-               }
-               files_vec.pop_back();
-           }
-        }
-    }
-    BOOST_LOG_TRIVIAL(info) << "finished post_init";
-#ifdef _WIN32
-    // Sets window property to mainframe so other instances can indentify it.
-    OtherInstanceMessageHandler::init_windows_properties(mainframe, m_instance_hash_int);
-#endif //WIN32
 }
 
 wxDEFINE_EVENT(EVT_ENTER_FORCE_UPGRADE, wxCommandEvent);
@@ -2090,28 +2100,27 @@ int GUI_App::updating_bambu_networking()
     return 0;
 }
 
-bool GUI_App::check_networking_version()
+static bool networking_version_matches()
 {
     std::string network_ver = Slic3r::NetworkAgent::get_version();
     if (!network_ver.empty()) {
         BOOST_LOG_TRIVIAL(info) << "get_network_agent_version=" << network_ver;
     }
     std::string studio_ver = SLIC3R_VERSION;
-    if (network_ver.length() >= 8) {
-        if (network_ver.substr(0,8) == studio_ver.substr(0,8)) {
-            m_networking_compatible = true;
-            return true;
-        }
-    }
+    return network_ver.length() >= 8 && network_ver.substr(0, 8) == studio_ver.substr(0, 8);
+}
 
-    m_networking_compatible = false;
-    return false;
+bool GUI_App::check_networking_version()
+{
+    m_networking_compatible = networking_version_matches();
+    return m_networking_compatible;
 }
 
 bool GUI_App::is_compatibility_version()
 {
-    BOOST_LOG_TRIVIAL(info) << boost::format("m_networking_compatible=%1%")%m_networking_compatible;
-    return m_networking_compatible;
+    BOOST_LOG_TRIVIAL(info) << boost::format("m_networking_compatible=%1%, loading=%2%")%m_networking_compatible %m_network_loading;
+    // Don't show the "install the network plug-in" tip while the plug-in is still loading.
+    return m_networking_compatible || m_network_loading;
 }
 
 void GUI_App::cancel_networking_install()
@@ -2443,6 +2452,8 @@ void GUI_App::init_networking_callbacks()
 GUI_App::~GUI_App()
 {
     BOOST_LOG_TRIVIAL(info) << boost::format("enter");
+    if (m_network_loader.joinable())
+        m_network_loader.join();
     if (app_config != nullptr) {
         BOOST_LOG_TRIVIAL(info) << boost::format("destroy app_config");
         delete app_config;
@@ -2940,6 +2951,10 @@ int GUI_App::OnExit()
     Slic3r::HelioQuery::shutdown_background_requests();
 
     stop_sync_user_preset();
+
+    // Let a background load of the network plug-in finish before tearing anything down.
+    if (m_network_loader.joinable())
+        m_network_loader.join();
 
     // The check_cert worker also runs the startup device-region query; join it
     // before m_agent is deleted below (the region call is bounded by the
@@ -3588,12 +3603,24 @@ bool GUI_App::on_init_inner()
     Slic3r::Http::set_extra_headers(extra_headers);
 
     copy_network_if_available();
-    on_init_network();
 
-    if (m_agent && m_agent->is_user_login()) {
-        enable_user_preset_folder(true);
+    // Loading the networking plugin and creating its agent takes several seconds, all of it inside
+    // the closed-source plugin. Unless there are files or links to open at startup (which may need
+    // the agent right away), load it on a worker thread and show the main window meanwhile. The user
+    // presets depend on who is logged in, so until the agent is there, assume the last user still is.
+    const bool load_network_in_background = init_params->input_files.empty();
+    if (load_network_in_background) {
+        m_assumed_preset_folder = app_config->get("preset_folder");
+        preset_bundle->update_user_presets_directory(m_assumed_preset_folder.empty() ? DEFAULT_USER_FOLDER_NAME : m_assumed_preset_folder);
+        // The main window expects these to exist; the agent is attached to them once it is loaded.
+        m_device_manager = new Slic3r::DeviceManager();
+        m_user_manager   = new Slic3r::UserManager();
+        // Started from post_init(), once the main window is up: while the plugin initializes it holds
+        // the dynamic loader lock, which stalled loading the presets and building the window.
+        m_network_loading = true;
     } else {
-        enable_user_preset_folder(false);
+        on_init_network();
+        enable_user_preset_folder(m_agent && m_agent->is_user_login());
     }
 
     // BBS if load user preset failed
@@ -3887,50 +3914,73 @@ void GUI_App::copy_network_if_available()
 
 bool GUI_App::on_init_network(bool try_backup)
 {
-    int  load_agent_dll       = Slic3r::NetworkAgent::initialize_network_module(false, !app_config->get_bool("ignore_module_cert"));
+    attach_network_agent(create_network_agent(try_backup, !app_config->get_bool("ignore_module_cert"), app_config->get("installed_networking") == "1"));
+    return true;
+}
+
+GUI_App::NetworkLoadResult GUI_App::create_network_agent(bool try_backup, bool check_cert, bool installed_networking)
+{
+    NetworkLoadResult result;
+    int  load_agent_dll       = Slic3r::NetworkAgent::initialize_network_module(false, check_cert);
     bool create_network_agent = false;
 __retry:
     if (!load_agent_dll) {
         BOOST_LOG_TRIVIAL(info) << "load dll ok";
-        if (check_networking_version()) {
+        if (networking_version_matches()) {
             BOOST_LOG_TRIVIAL(info) << "compatibility version";
+            result.compatible = true;
             auto bambu_source = Slic3r::NetworkAgent::get_bambu_source_entry();
             if (!bambu_source) {
                 BOOST_LOG_TRIVIAL(info) << "can not get bambu source module!";
-                m_networking_compatible = false;
-                if (app_config->get("installed_networking") == "1") {
-                    m_networking_need_update = true;
+                result.compatible = false;
+                if (installed_networking) {
+                    result.need_update = true;
                 }
             }
             else
                 create_network_agent = true;
         } else {
             if (try_backup) {
-                int result = Slic3r::NetworkAgent::unload_network_module();
-                BOOST_LOG_TRIVIAL(info) << "version mismatch, unload_network_module, result = " << result;
-                load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(true, !app_config->get_bool("ignore_module_cert"));
+                int unload_result = Slic3r::NetworkAgent::unload_network_module();
+                BOOST_LOG_TRIVIAL(info) << "version mismatch, unload_network_module, result = " << unload_result;
+                load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(true, check_cert);
                 try_backup = false;
                 goto __retry;
             }
             BOOST_LOG_TRIVIAL(info) << "version dismatch, need upload network module";
-            if (app_config->get("installed_networking") == "1") {
-                m_networking_need_update = true;
+            if (installed_networking) {
+                result.need_update = true;
             }
         }
     } else {
         BOOST_LOG_TRIVIAL(info) << "load dll failed";
-        if (app_config->get("installed_networking") == "1") {
+        if (installed_networking) {
             BOOST_LOG_TRIVIAL(info) << "need upload network module";
-            m_networking_need_update = true;
+            result.need_update = true;
         }
     }
 
     if (create_network_agent) {
         BOOST_LOG_TRIVIAL(info) << boost::format("create network agent...");
+        result.agent = new Slic3r::NetworkAgent(data_dir());
+    } else {
+        int unload_result = Slic3r::NetworkAgent::unload_network_module();
+        BOOST_LOG_TRIVIAL(info) << "unload_network_module, result = " << unload_result;
+    }
+    return result;
+}
+
+void GUI_App::attach_network_agent(const NetworkLoadResult &result)
+{
+    m_networking_compatible = result.compatible;
+    if (result.need_update)
+        m_networking_need_update = true;
+
+    if (result.agent) {
         //std::string data_dir = wxStandardPaths::Get().GetUserDataDir().ToUTF8().data();
         std::string data_directory = data_dir();
 
-        m_agent = new Slic3r::NetworkAgent(data_directory);
+        m_agent = result.agent;
 
         if (!m_device_manager)
             m_device_manager = new Slic3r::DeviceManager(m_agent);
@@ -3980,17 +4030,68 @@ __retry:
         }
     }
     else {
-        int result = Slic3r::NetworkAgent::unload_network_module();
-        BOOST_LOG_TRIVIAL(info) << "unload_network_module, result = " << result;
-
         if (!m_device_manager)
             m_device_manager = new Slic3r::DeviceManager();
 
         if (!m_user_manager)
             m_user_manager = new Slic3r::UserManager();
     }
+}
 
-    return true;
+void GUI_App::start_network_loading()
+{
+    m_network_loading = true;
+    if (m_network_loader.joinable())
+        return;
+    const bool check_cert           = !app_config->get_bool("ignore_module_cert");
+    const bool installed_networking = app_config->get("installed_networking") == "1";
+    m_network_loader = std::thread([this, check_cert, installed_networking]() {
+        perf_mark("Network plugin loading begin");
+        NetworkLoadResult result = create_network_agent(false, check_cert, installed_networking);
+        perf_mark("Network plugin loaded");
+        CallAfter([this, result]() { on_network_loaded(result); });
+    });
+}
+
+void GUI_App::on_network_loaded(const NetworkLoadResult &result)
+{
+    if (m_network_loader.joinable())
+        m_network_loader.join();
+    if (is_closing() || !m_network_loading)
+        return;
+
+    attach_network_agent(result);
+    m_network_loading = false;
+
+    // The user presets were loaded from the folder of the last logged-in user. If the login state
+    // turned out different, switch to the right folder, as a login or logout would.
+    const std::string user_id = (m_agent && m_agent->is_user_login()) ? m_agent->get_user_id() : std::string();
+    if (user_id != m_assumed_preset_folder) {
+        BOOST_LOG_TRIVIAL(info) << "network loaded: login state differs from the assumed one, reloading user presets";
+        remove_user_presets();
+        enable_user_preset_folder(!user_id.empty());
+        preset_bundle->load_user_presets(user_id.empty() ? DEFAULT_USER_FOLDER_NAME : user_id, ForwardCompatibilitySubstitutionRule::Enable);
+        if (mainframe)
+            mainframe->update_side_preset_ui();
+    }
+
+    // The home page may have asked for the login state before the agent existed.
+    if (mainframe) {
+        get_login_info();
+        mainframe->refresh_plugin_tips();
+    }
+
+    if (m_post_init_network_pending) {
+        m_post_init_network_pending = false;
+        post_init_network();
+    }
+
+    if (m_tab_after_network_load >= 0 && mainframe) {
+        int tab = m_tab_after_network_load;
+        m_tab_after_network_load = -1;
+        mainframe->select_tab(size_t(tab));
+    }
+    perf_mark("Network ready");
 }
 
 unsigned GUI_App::get_colour_approx_luma(const wxColour &colour)
@@ -4571,6 +4672,11 @@ void GUI_App::ShowUserGuide() {
 
 void GUI_App::ShowDownNetPluginDlg(bool post_login)
 {
+    // The plug-in is installed and still loading in the background; don't offer to install it.
+    if (m_network_loading) {
+        BOOST_LOG_TRIVIAL(info) << "ShowDownNetPluginDlg: skipped, network plug-in still loading";
+        return;
+    }
     try {
         auto iter = std::find_if(dialogStack.begin(), dialogStack.end(), [](auto dialog) {
             return dynamic_cast<DownloadProgressDialog *>(dialog) != nullptr;

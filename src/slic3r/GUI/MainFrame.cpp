@@ -1409,6 +1409,12 @@ void MainFrame::init_tabpanel()
         if (wxGetApp().preset_bundle &&
             wxGetApp().preset_bundle->printers.get_edited_preset().is_bbl_vendor_preset(wxGetApp().preset_bundle) &&
             new_sel == tpMonitor) {
+            if (!wxGetApp().getAgent() && wxGetApp().is_network_loading()) {
+                // The network plug-in is still loading in the background; open the tab once it is ready.
+                e.Veto();
+                wxGetApp().open_tab_after_network_load(new_sel);
+                return;
+            }
             if (!wxGetApp().getAgent()) {
                 e.Veto();
                 BOOST_LOG_TRIVIAL(info) << boost::format("skipped tab switch from %1% to %2%, lack of network plugins") %
